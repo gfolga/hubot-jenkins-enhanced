@@ -323,6 +323,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     job = @_getJob()
     if not job
       return
+    server = @_serverManager.getServerByJobName(job.name)
     command = if buildWithEmptyParameters then "buildWithParameters" else "build"
     inputId = 'Proceed'
     buildId   = @msg.match[2]
