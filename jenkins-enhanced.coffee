@@ -17,6 +17,7 @@
 #   hubot jenkins b <jobNumber> - builds the job specified by jobNumber. List jobs to get number.
 #   hubot jenkins b <jobNumber>&<params> - builds the job specified by jobNumber with parameters as key=value&key2=value2. List jobs to get number.
 #   hubot jenkins build <job|alias|job folder/job> - builds the specified Jenkins job
+#   hubot jenkins abort job buildId
 #   hubot jenkins build <job|alias|job folder/job>&<params> - builds the specified Jenkins job with parameters as key=value&key2=value2
 #   hubot jenkins d <jobNumber> - Describes the job specified by jobNumber. List jobs to get number.
 #   hubot jenkins describe <job|alias|job folder/job> - Describes the specified Jenkins job
@@ -229,7 +230,7 @@ class JenkinsServerManager extends HubotMessenger
       message = "#{server.url}\n"
       message += @_serversSubFoldersAndJobs(server, server.getFolder())
       @send message
-  
+
   _serversSubFoldersAndJobs: (server, folder) =>
     response = ""
     # add the current folder's jobs first
@@ -317,12 +318,20 @@ class HubotJenkinsPlugin extends HubotMessenger
       return
     @_requestFactorySingle server, null, path, @_handleBuild, "post"
 
+  abort: (buildWithEmptyParameters) =>
+    command = if buildWithEmptyParameters then "buildWithParameters" else "build"
+    job = @_getJob()
+    inputId = 'Proceed'
+    buildId   = @msg.match[2]
+    path = "#{job.path}/#{buildId}/input/#{inputId}/abort"
+    @_requestFactorySingle server, null, path, @_handleAbort, "post"
+
   describeById: =>
     return if not @_init(@describeById)
     job = @_getJobById()
     if not job
       @reply "I couldn't find that job. Try `jenkins list` to get a list."
-      return  
+      return
     @_setJob job
     @describe()
 
@@ -343,15 +352,16 @@ class HubotJenkinsPlugin extends HubotMessenger
     aliasValue = aliases[aliasKey]
     @msg.send "'#{aliasKey}' is an alias for '#{aliasValue}'"
 
+
   lastById: =>
     return if not @_init(@lastById)
     job = @_getJobById()
     if not job
       @reply "I couldn't find that job. Try `jenkins list` to get a list."
-      return  
+      return
     @_setJob job
     @last()
-	
+
   last: =>
     return if not @_init(@last)
     job = @_getJob()
@@ -389,7 +399,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     aliases[aliasKey] = aliasValue
     @robot.brain.set 'jenkins_aliases', aliases
     @msg.send "'#{aliasKey}' is now an alias for '#{aliasValue}'"
-	
+
   remAlias: =>
     aliases    = @_getSavedAliases()
     aliasKey   = @msg.match[1]
@@ -420,7 +430,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     @_addJobsToFoldersList(items, server, rootFolder)
 
   _addJobsToFoldersList: (items, server, folder) =>
-    jenkinsJobFolderType = ['jenkins.branch.OrganizationFolder','com.cloudbees.hudson.plugins.folder.Folder','org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject']    
+    jenkinsJobFolderType = ['jenkins.branch.OrganizationFolder','com.cloudbees.hudson.plugins.folder.Folder','org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject']
     for item in items
       itemType = item._class
       if (itemType in jenkinsJobFolderType)
@@ -438,7 +448,7 @@ class HubotJenkinsPlugin extends HubotMessenger
       for server in @_serverManager.listServers()
         @_listJobs(server, server.getFolder(), true)
       @_initComplete() if @_serverManager.hasInitialized()
-    
+
 
   _listJobs: (server, folder, isRoot=false) =>
     response = ""
@@ -452,7 +462,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     if isRoot
       if @_outputStatus
         @send "Server: #{server.url}\n#{response}"
-    else 
+    else
       return response
 
   _configureRequest: (request, server = null) =>
@@ -531,8 +541,8 @@ class HubotJenkinsPlugin extends HubotMessenger
       # we're safe to just use the first one, as they should all have the same name
       @send "There are multiple folders with the name #{folders[0].name} that have a job called #{jobName}.  Please use `jenkins list` and an ID instead."
     else if (jobs.length == 1)
-      return jobs[0] 
-    # no else case because there aren't any folders to pull a name from	to send a message to the user 
+      return jobs[0]
+    # no else case because there aren't any folders to pull a name from	to send a message to the user
     null
 
   _getJobByFolderName: (folderName, jobName) =>
@@ -570,7 +580,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     # if the provided name is an alias, provide it's mapped job name
     aliases = @_getSavedAliases()
     jobName = aliases[jobName] if aliases[jobName]
-	
+
     jobs = []
     # perform lookup
     for server in @_serverManager.listServers()
@@ -580,7 +590,7 @@ class HubotJenkinsPlugin extends HubotMessenger
     if jobs.length > 1
       @send "There are multiple jobs with that name, please use an id from `jenkins list` instead or a folder path."
     else if jobs.length == 1
-      return jobs[0] 
+      return jobs[0]
     else
       @send "There are no jobs with the name #{jobName}"
     null
@@ -636,6 +646,17 @@ class HubotJenkinsPlugin extends HubotMessenger
     else if 200 <= res.statusCode < 400 # Or, not an error code.
       job = @_getJob(false)
       @reply "(#{res.statusCode}) Build started for #{job.name} #{server.url}/#{job.path}"
+    else if 400 == res.statusCode
+      @build true
+    else
+      @reply "Status #{res.statusCode} #{body}"
+
+  _handleAbort: (err, res, body, server, folder) =>
+    if err
+      @reply "It appears an error occurred while contacting your Jenkins instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Jenkins instance is configured properly."
+    else if 200 <= res.statusCode < 400 # Or, not an error code.
+      job = @_getJob(false)
+      @reply "(#{res.statusCode}) Aborting #{job.name} #{server.url}/#{job.path}"
     else if 400 == res.statusCode
       @build true
     else
@@ -734,6 +755,9 @@ module.exports = (robot) ->
   robot.respond /j(?:enkins)? build ([^&]+)(&\s?(.+))?/i, id: 'jenkins.build', (msg) ->
     pluginFactory(msg).build false
 
+  robot.respond /j(?:enkins)? abort ([^&]+)(&\s?(.+))?/i, id: 'jenkins.abort', (msg) ->
+    pluginFactory(msg).abort false
+
   robot.respond /j(?:enkins)? b (\d+)(&\s?(.+))?/i, id: 'jenkins.b', (msg) ->
     pluginFactory(msg).buildById()
 
@@ -742,7 +766,7 @@ module.exports = (robot) ->
 
   robot.respond /j(?:enkins)? describe (.*)/i, id: 'jenkins.describe', (msg) ->
     pluginFactory(msg).describe()
-	
+
   robot.respond /j(?:enkins)? d (\d+)/i, id: 'jenkins.d', (msg) ->
     pluginFactory(msg).describeById()
 
@@ -760,13 +784,14 @@ module.exports = (robot) ->
 
   robot.respond /j(?:enkins)? setAlias (.*), (.*)/i, id: 'jenkins.setAlias', (msg) ->
     pluginFactory(msg).setAlias()
-	
+
   robot.respond /j(?:enkins)? remAlias (.*)/i, id: 'jenkins.remAlias', (msg) ->
     pluginFactory(msg).remAlias()
 
   robot.jenkins =
     aliases:  ((msg) -> pluginFactory(msg).listAliases())
     build:    ((msg) -> pluginFactory(msg).build())
+    abort:    ((msg) -> pluginFactory(msg).abort())
     describe: ((msg) -> pluginFactory(msg).describe())
     getAlias: ((msg) -> pluginFactory(msg).getAlias())
     last:     ((msg) -> pluginFactory(msg).last())
