@@ -319,8 +319,11 @@ class HubotJenkinsPlugin extends HubotMessenger
     @_requestFactorySingle server, null, path, @_handleBuild, "post"
 
   abort: (buildWithEmptyParameters) =>
-    command = if buildWithEmptyParameters then "buildWithParameters" else "build"
+    return if not @_init(@abort)
     job = @_getJob()
+    if not job
+      return
+    command = if buildWithEmptyParameters then "buildWithParameters" else "build"
     inputId = 'Proceed'
     buildId   = @msg.match[2]
     path = "#{job.path}/#{buildId}/input/#{inputId}/abort"
