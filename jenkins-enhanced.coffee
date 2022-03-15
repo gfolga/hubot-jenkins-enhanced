@@ -17,7 +17,8 @@
 #   hubot jenkins b <jobNumber> - builds the job specified by jobNumber. List jobs to get number.
 #   hubot jenkins b <jobNumber>&<params> - builds the job specified by jobNumber with parameters as key=value&key2=value2. List jobs to get number.
 #   hubot jenkins build <job|alias|job folder/job> - builds the specified Jenkins job
-#   hubot jenkins abort job buildId
+#   hubot jenkins abort job&buildId
+#   hubot jenkins proceed job&buildId
 #   hubot jenkins build <job|alias|job folder/job>&<params> - builds the specified Jenkins job with parameters as key=value&key2=value2
 #   hubot jenkins d <jobNumber> - Describes the job specified by jobNumber. List jobs to get number.
 #   hubot jenkins describe <job|alias|job folder/job> - Describes the specified Jenkins job
@@ -327,9 +328,22 @@ class HubotJenkinsPlugin extends HubotMessenger
     command = if buildWithEmptyParameters then "buildWithParameters" else "build"
     inputId = 'Proceed'
     buildId   = @msg.match[2]
-    buildId = buildId.replace /&/, ''									
+    buildId = buildId.replace /&/, ''
     path = "#{job.path}/#{buildId}/input/#{inputId}/abort"
     @_requestFactorySingle server, null, path, @_handleAbort, "post"
+
+  proceed: (buildWithEmptyParameters) =>
+    return if not @_init(@proceed)
+    job = @_getJob()
+    if not job
+      return
+    server = @_serverManager.getServerByJobName(job.name)
+    command = if buildWithEmptyParameters then "buildWithParameters" else "build"
+    inputId = 'Proceed'
+    buildId   = @msg.match[2]
+    buildId = buildId.replace /&/, ''
+    path = "#{job.path}/#{buildId}/input/#{inputId}/proceedEmpty"
+    @_requestFactorySingle server, null, path, @_handleProceed, "post"
 
   describeById: =>
     return if not @_init(@describeById)
@@ -667,6 +681,17 @@ class HubotJenkinsPlugin extends HubotMessenger
     else
       @reply "Status #{res.statusCode} #{body}"
 
+  _handleProceed: (err, res, body, server, folder) =>
+    if err
+      @reply "It appears an error occurred while contacting your Jenkins instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Jenkins instance is configured properly."
+    else if 200 <= res.statusCode < 400 # Or, not an error code.
+      job = @_getJob(false)
+      @reply "(#{res.statusCode}) Proceeding with #{job.name} #{server.url}/#{job.path}"
+    else if 400 == res.statusCode
+      @build true
+    else
+      @reply "Status #{res.statusCode} #{body}"
+
   _handleDescribe: (err, res, body, server, folder) =>
     if err
       @send "It appears an error occurred while contacting your Jenkins instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Jenkins instance is configured properly."
@@ -763,6 +788,9 @@ module.exports = (robot) ->
   robot.respond /j(?:enkins)? abort ([^&]+)(&\s?(.+))?/i, id: 'jenkins.abort', (msg) ->
     pluginFactory(msg).abort false
 
+  robot.respond /j(?:enkins)? proceed ([^&]+)(&\s?(.+))?/i, id: 'jenkins.proceed', (msg) ->
+    pluginFactory(msg).proceed false
+
   robot.respond /j(?:enkins)? b (\d+)(&\s?(.+))?/i, id: 'jenkins.b', (msg) ->
     pluginFactory(msg).buildById()
 
@@ -797,6 +825,7 @@ module.exports = (robot) ->
     aliases:  ((msg) -> pluginFactory(msg).listAliases())
     build:    ((msg) -> pluginFactory(msg).build())
     abort:    ((msg) -> pluginFactory(msg).abort())
+    proceed:  ((msg) -> pluginFactory(msg).proceed())
     describe: ((msg) -> pluginFactory(msg).describe())
     getAlias: ((msg) -> pluginFactory(msg).getAlias())
     last:     ((msg) -> pluginFactory(msg).last())
